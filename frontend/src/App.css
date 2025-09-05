@@ -1,0 +1,260 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@import 'leaflet/dist/leaflet.css';
+
+
+* {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--muted)) 100%);
+  min-height: 100vh;
+  transition: background 0.3s ease;
+}
+
+.dark body {
+  background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(222.2 84% 2.9%) 100%);
+}
+
+
+.custom-marker {
+  background: transparent;
+  border: none;
+}
+
+.marker-wrapper {
+  position: relative;
+  width: 24px;
+  height: 24px;
+}
+
+.marker-inner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 0 0 0 currentColor;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.marker-pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: marker-pulse 2s ease-in-out infinite;
+  z-index: 1;
+}
+
+/* Route line animations */
+.route-line {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 2px 4px rgba(239, 68, 68, 0.3));
+}
+
+.animate-route-draw {
+  stroke-dasharray: 20, 10;
+  animation: route-draw 2s ease-out forwards;
+}
+
+.animate-route-pulse {
+  animation: route-pulse 3s ease-in-out infinite;
+}
+
+/* Keyframe animations */
+@keyframes marker-drop {
+  0% {
+    transform: translate(-50%, -50%) translateY(-30px) scale(0.3);
+    opacity: 0;
+  }
+  50% {
+    transform: translate(-50%, -50%) translateY(5px) scale(1.1);
+  }
+  100% {
+    transform: translate(-50%, -50%) translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes marker-pulse {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes route-draw {
+  from {
+    stroke-dashoffset: 1000;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes route-pulse {
+  0%, 100% {
+    opacity: 0.9;
+    filter: drop-shadow(0 2px 4px rgba(239, 68, 68, 0.3));
+  }
+  50% {
+    opacity: 0.7;
+    filter: drop-shadow(0 4px 8px rgba(239, 68, 68, 0.5));
+  }
+}
+
+.animate-marker-drop {
+  animation: marker-drop 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* Map container styling */
+.map-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.map-tiles {
+  filter: contrast(1.1) saturate(1.1);
+  transition: filter 0.3s ease;
+}
+
+.dark .map-tiles {
+  filter: contrast(0.9) saturate(0.8) brightness(0.9);
+}
+
+.leaflet-container {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: hsl(var(--muted));
+}
+
+.leaflet-control-container {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+/* Custom scrollbar for sidebar */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+  border-radius: 3px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* Smooth transitions for all interactive elements */
+button, input, select, textarea {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button:hover, input:hover, select:hover, textarea:hover {
+  transform: translateY(-1px);
+}
+
+button:active, input:active, select:active, textarea:active {
+  transform: translateY(0);
+}
+
+/* Focus states for accessibility */
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  transform: translateY(-1px);
+}
+
+.leaflet-container:focus {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Backdrop blur support */
+@supports (backdrop-filter: blur(12px)) {
+  .backdrop-blur-md {
+    backdrop-filter: blur(12px);
+  }
+}
+
+/* Mobile optimizations */
+@media (max-width: 1024px) {
+  .leaflet-control-zoom {
+    display: none;
+  }
+  
+  .marker-wrapper {
+    width: 20px;
+    height: 20px;
+  }
+  
+  .marker-inner {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .marker-pulse {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .marker-inner {
+    border-width: 4px;
+  }
+  
+  .route-line {
+    stroke-width: 8px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .animate-marker-drop,
+  .marker-pulse,
+  .animate-route-draw,
+  .animate-route-pulse {
+    animation: none;
+  }
+  
+  button, input, select, textarea {
+    transition: none;
+  }
+}
+
+/* Print styles */
+@media print {
+  .leaflet-control-container,
+  nav,
+  aside,
+  .mobile-actions {
+    display: none !important;
+  }
+  
+  .map-container {
+    border: 2px solid #000;
+  }
+}
