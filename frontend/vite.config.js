@@ -9,4 +9,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    // allow serving files from the project root (parent) because some node_modules
+    // are located one level up (workspace-level installs). This prevents Vite from
+    // blocking requests to leaflet-draw sprites/images outside the frontend folder.
+    fs: {
+      allow: [path.resolve(__dirname), path.resolve(__dirname, '..')]
+    }
+  }
 })
