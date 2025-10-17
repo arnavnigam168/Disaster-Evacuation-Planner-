@@ -21,7 +21,6 @@ public class Route {
         this.routeGeoJson = routeGeoJson;
         this.createdAt = createdAt;
     }
-    // getters and setters
     public Long getId() { return id; }
     public String getStartLocation() { return startLocation; }
     public String getEndLocation() { return endLocation; }
