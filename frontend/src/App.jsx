@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Moon, Sun, Search, Clock, MapPin, CloudRain, ThermometerSun } from 'lucide-react';
 import MapComponent from './components/MapComponent';
+import TurnByTurn from './components/TurnByTurn';
+import AlternativesList from './components/AlternativesList';
 import axios from 'axios';
+import DisasterSelector from './components/DisasterSelector';
+import SafetyDashboard from './components/SafetyDashboard';
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -13,17 +17,26 @@ function App() {
   const [error, setError] = useState('');
   const [routeData, setRouteData] = useState(null);
   const [weather, setWeather] = useState(null);
+  const [polygonCoords, setPolygonCoords] = useState([]); // Track poly for avoidance
+  const [disasterType, setDisasterType] = useState('general'); // flood|fire|ocean|industrial|general
+  const [showSteps, setShowSteps] = useState(true);
+  const [showAlternatives, setShowAlternatives] = useState(true);
+  const [showTraffic, setShowTraffic] = useState(false);
+const [stops, setStops] = useState([]);
+const [altIndex, setAltIndex] = useState(null);
+const [alternatives, setAlternatives] = useState([]);
+const [showWeather, setShowWeather] = useState(false);
+
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
   const toggleTheme = () => setTheme(theme === 'dark' ? 'light' : 'dark');
 
   const geocodeLocation = async (location) => {
     try {
-      const response = await axios.get(`https://nominatim.openstreetmap.org/search`, {
-        params: { q: location, format: 'json', limit: 1, addressdetails: 1 },
-      });
-      const data = response.data[0];
-      if (data) return { lat: parseFloat(data.lat), lng: parseFloat(data.lon) };
+      const response = await axios.get(`http://localhost:8080/api/geocode`, { params: { q: location } });
+      if (response.data?.status === 'success') {
+        return { lat: response.data.lat, lng: response.data.lng };
+      }
       return null;
     } catch (err) {
       console.error('Geocoding error:', err);
@@ -41,25 +54,17 @@ function App() {
     }
   };
 
-  const fetchRoute = async (startCoords, endCoords) => {
-    try {
-      const response = await fetch(
-        `https://router.project-osrm.org/route/v1/driving/${startCoords.lng},${startCoords.lat};${endCoords.lng},${endCoords.lat}?overview=full&geometries=geojson`
-      );
-      const data = await response.json();
-      if (data.code === 'Ok' && data.routes.length > 0) {
-        const route = data.routes[0];
-        return {
-          distance: (route.distance / 1000).toFixed(2), // km
-          time: Math.round(route.duration / 3600), // hours
-          safety: 85, // Placeholder safety (can be dynamic with traffic data later)
-        };
-      }
-      throw new Error('No route found');
-    } catch (err) {
-      console.error('OSRM error:', err);
-      return null;
-    }
+  const handlePolygonDrawn = (coords) => {
+    setPolygonCoords(coords);
+    const polyGeoJSON = {
+      type: "Polygon",
+      coordinates: [coords.map(([lat, lon]) => [lon, lat])] // [lon, lat] for backend
+    };
+    setRouteData(prev => ({
+      ...prev,
+      avoidancePolygon: polyGeoJSON,
+      stats: { distance: 'Loading...', time: 'Loading...', safety: 'Loading...' }
+    }));
   };
 
   const handleSearch = async (e) => {
@@ -70,6 +75,7 @@ function App() {
     setError('');
     setRouteData(null);
     setWeather(null);
+    setPolygonCoords([]);
 
     const startCoords = await geocodeLocation(startLocation);
     const endCoords = await geocodeLocation(endLocation);
@@ -80,21 +86,73 @@ function App() {
       return;
     }
 
-    const routeStats = await fetchRoute(startCoords, endCoords);
-    if (!routeStats) {
-      setError('Could not calculate route. Please try different locations.');
-      setLoading(false);
-      return;
-    }
-
     const midLat = (startCoords.lat + endCoords.lat) / 2;
     const midLng = (startCoords.lng + endCoords.lng) / 2;
     const weatherData = await fetchWeather({ lat: midLat, lng: midLng });
 
-    setRouteData({ startCoords, endCoords, stats: routeStats });
+    setRouteData({ 
+      startLocation, 
+      endLocation, 
+      startCoords, 
+      endCoords, 
+      stats: { distance: 0, time: 0, safety: 0 }
+    });
     setWeather(weatherData);
     setLoading(false);
   };
+
+  useEffect(() => {
+    const fetchRoute = async () => {
+      if (!routeData?.startCoords || !routeData?.endCoords) return;
+
+      setLoading(true);
+      try {
+        const payload = {
+          startLocation: routeData.startLocation,
+          endLocation: routeData.endLocation,
+          startCoords: [routeData.startCoords.lng, routeData.startCoords.lat],
+          endCoords: [routeData.endCoords.lng, routeData.endCoords.lat],
+          avoidancePolygon: routeData.avoidancePolygon,
+          altIndex,
+          viaPoints: (stops||[]).filter(s => s.coords).map(s => [s.coords.lng, s.coords.lat])
+        };
+        console.log('Fetch Route Payload:', payload);
+        const response = await axios.post('http://localhost:8080/api/route', payload);
+        if (response.data.status === 'success') {
+          const { distance, time, safety, routeGeoJSON, instructions, rri, rriFactors, alternatives: altSums, altGeometries, pickedAlternativeIndex } = response.data;
+          const distanceKm = parseFloat(distance.replace(' km', '')) || 0;
+          const timeMin = parseInt(time.replace(' min', '')) || 0;
+          const safetyPerc = parseFloat(safety) || 0;
+          setRouteData(prev => ({
+            ...prev,
+            stats: { distance: distanceKm, time: timeMin / 60, safety: safetyPerc },
+            routeGeoJSON,
+            instructions: Array.isArray(instructions) ? instructions : [],
+            rri,
+            rriFactors,
+            altGeometries: Array.isArray(altGeometries) ? altGeometries : [],
+            hoverAltIndex: null,
+            hoverPoint: null,
+          }));
+          const currentIdx = typeof pickedAlternativeIndex === 'number' ? pickedAlternativeIndex : 0;
+          setAlternatives(Array.isArray(altSums) ? altSums.filter(a => a.index !== currentIdx) : []);
+          if (typeof pickedAlternativeIndex === 'number') setAltIndex(pickedAlternativeIndex);
+          console.log('Fetch Route Success:', response.data);
+        }
+      } catch (error) {
+        console.error('Route fetch error:', error.response?.status, error.response?.data?.message || error.message);
+        setError('Failed to fetch route. Check backend logs.');
+        setRouteData(prev => ({
+          ...prev,
+          stats: { distance: 0, time: 0, safety: 0 }
+        }));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRoute();
+  }, [routeData?.startCoords, routeData?.endCoords, routeData?.avoidancePolygon, altIndex]);
 
   return (
     <div className="flex h-screen w-screen" data-theme={theme}>
@@ -120,7 +178,7 @@ function App() {
               type="text"
               value={startLocation}
               onChange={(e) => setStartLocation(e.target.value)}
-              placeholder="Start Location (e.g., Chennai)"
+              placeholder="Start Location (e.g., Bhopal)"
               className="input-field mb-2 text-hsl(var(--foreground))"
               aria-label="Start location"
             />
@@ -128,10 +186,44 @@ function App() {
               type="text"
               value={endLocation}
               onChange={(e) => setEndLocation(e.target.value)}
-              placeholder="End Location (e.g., Pune)"
+              placeholder="End Location (e.g., Jabalpur)"
               className="input-field mb-2 text-hsl(var(--foreground))"
               aria-label="End location"
             />
+            <div className="mb-2">
+              <div className="text-xs text-gray-400 mb-1">Via Stops</div>
+              {stops.map((s, i) => (
+                <div key={i} className="flex gap-2 mb-1">
+                  <input
+                    type="text"
+                    value={s.label || ''}
+                    onChange={(e) => { const arr = [...stops]; arr[i] = { ...arr[i], label: e.target.value }; setStops(arr); }}
+                    placeholder={`Stop ${i+1}`}
+                    className="input-field text-hsl(var(--foreground)) flex-1"
+                  />
+                  <button type="button" className="btn-primary" onClick={async () => {
+                    if (!stops[i]?.label) return;
+                    const c = await geocodeLocation(stops[i].label);
+                    const arr = [...stops]; arr[i] = { ...arr[i], coords: c }; setStops(arr);
+                  }}>Geocode</button>
+                  <button type="button" className="btn-primary" onClick={() => setStops(stops.filter((_, idx) => idx !== i))}>Del</button>
+                </div>
+              ))}
+              <button type="button" className="btn-primary" onClick={() => setStops([...(stops||[]), { label: '', coords: null }])}>Add Stop</button>
+            </div>
+            <div className="flex items-center gap-2 mb-2">
+              <label className="text-sm text-gray-400">Disaster Type</label>
+              <select
+                value={disasterType}
+                onChange={(e) => setDisasterType(e.target.value)}
+                className="input-field text-hsl(var(--foreground))"
+              >
+                <option value="general">General</option>
+                <option value="flood">Flood / Ocean</option>
+                <option value="fire">Fire</option>
+                <option value="industrial">Industrial</option>
+              </select>
+            </div>
             <button type="submit" className="btn-primary" disabled={loading}>
               {loading ? (
                 <motion.div
@@ -158,20 +250,36 @@ function App() {
               </div>
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div className="bg-primary/10 p-2 rounded-lg">
-                  <div className="font-bold text-lg text-hsl(var(--foreground))">{routeData.stats.distance} km</div>
+                  <div className="font-bold text-lg text-hsl(var(--foreground))">
+                    {typeof routeData.stats.distance === 'number' ? routeData.stats.distance.toFixed(1) : '0'} km
+                  </div>
                   <div className="text-gray-400 text-sm">Distance</div>
                 </div>
                 <div className="bg-primary/10 p-2 rounded-lg">
-                  <div className="font-bold text-lg text-hsl(var(--foreground))">{routeData.stats.time} h</div>
+                  <div className="font-bold text-lg text-hsl(var(--foreground))">
+                    {typeof routeData.stats.time === 'number' ? routeData.stats.time.toFixed(2) : '0'} h
+                  </div>
                   <div className="text-gray-400 text-sm">Time</div>
                 </div>
                 <div className="bg-primary/10 p-2 rounded-lg">
-                  <div className="font-bold text-lg text-hsl(var(--foreground))">{routeData.stats.safety}%</div>
+                  <div className="font-bold text-lg text-hsl(var(--foreground))">
+                    {typeof routeData.stats.safety === 'number' ? routeData.stats.safety.toFixed(1) : '0'}%
+                  </div>
                   <div className="text-gray-400 text-sm">Safety</div>
                 </div>
               </div>
             </motion.div>
           )}
+          {routeData?.rriFactors && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="panel mt-4">
+              <div className="panel-title">
+                <span className="text-hsl(var(--foreground))">Safety Breakdown</span>
+              </div>
+              <SafetyDashboard rri={routeData?.rri} factors={routeData?.rriFactors} />
+            </motion.div>
+          )}
+          {/* Removed sidebar Turn-by-Turn (now floating on map) */}
+
           {weather && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -195,7 +303,59 @@ function App() {
           </button>
         </motion.div>
       )}
-      <MapComponent routeData={routeData} />
+      <MapComponent routeData={routeData} onPolygonDrawn={handlePolygonDrawn} disasterType={disasterType} showWeather={showWeather} showTraffic={showTraffic} />
+
+      {/* Alternatives List Floating Card */}
+      {showAlternatives && (
+        <div className="fixed top-20 right-4 z-[1000] w-72 p-3 rounded-lg shadow-xl"
+          style={{ background: theme === 'dark' ? 'rgba(17,24,39,0.95)' : 'rgba(255,255,255,0.95)', border: '1px solid rgba(100,116,139,0.3)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-semibold text-hsl(var(--foreground))">Alternatives</div>
+            <div className="flex items-center gap-2 text-xs">
+              <label className="flex items-center gap-1 text-gray-400">
+                <input type="checkbox" checked={showWeather} onChange={(e) => setShowWeather(e.target.checked)} /> Weather
+              </label>
+              <label className="flex items-center gap-1 text-gray-400">
+                <input type="checkbox" checked={showTraffic} onChange={(e) => setShowTraffic(e.target.checked)} /> Traffic
+              </label>
+              <button className="text-gray-400" onClick={() => setShowAlternatives(false)}>Close</button>
+            </div>
+          </div>
+          {alternatives.length > 0 ? (
+            <AlternativesList items={alternatives} selectedIndex={altIndex ?? 0} onSelect={(idx) => { setAltIndex(idx); }} onHover={(idx)=> setRouteData(prev=> ({...prev, hoverAltIndex: idx}))} />
+          ) : (
+            <div className="text-xs text-gray-400">No alternative routes available for this query.</div>
+          )}
+        </div>
+      )}
+
+      {/* Small open buttons */}
+      {!showAlternatives && alternatives.length > 0 && (
+        <button className="fixed top-20 right-4 z-[1000] btn-primary px-3 py-1" onClick={()=> setShowAlternatives(true)}>Alts</button>
+      )}
+      {!showAlternatives && alternatives.length === 0 && (
+        <button className="fixed top-20 right-4 z-[1000] btn-primary px-3 py-1" onClick={()=> setShowAlternatives(true)}>Layers</button>
+      )}
+      {!showSteps && routeData?.instructions?.length > 0 && (
+        <button className="fixed bottom-16 right-4 z-[1000] btn-primary px-3 py-1" onClick={()=> setShowSteps(true)}>Steps</button>
+      )}
+
+      {/* Floating Turn-by-Turn Panel (always visible when instructions are present) */}
+      {showSteps && routeData?.instructions?.length > 0 && (
+        <div
+          className="fixed bottom-16 right-4 z-[1000] w-80 max-h-[50vh] overflow-y-auto p-3 rounded-lg shadow-xl"
+          style={{
+            background: theme === 'dark' ? 'rgba(17, 24, 39, 0.95)' : 'rgba(255,255,255,0.95)',
+            border: '1px solid rgba(100,116,139,0.3)'
+          }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-sm font-semibold text-hsl(var(--foreground))">Turn-by-Turn</div>
+            <button className="text-xs text-gray-400 hover:text-gray-200" onClick={()=> setShowSteps(false)}>Close</button>
+          </div>
+          <TurnByTurn steps={routeData.instructions} onStepHover={(pt) => setRouteData(prev => ({ ...prev, hoverPoint: pt }))} />
+        </div>
+      )}
       <button
         onClick={toggleSidebar}
         className="fixed top-4 left-4 z-50 btn-primary p-2"
